@@ -1,0 +1,56 @@
+# --- Data ---
+data/
+*.csv
+*.jsonl
+
+# --- Kaggle ---
+kaggle.json
+kernel-metadata.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# --- Virtual Environment ---
+venv/
+.venv/
+env/
+
+# --- Environment & Secrets ---
+.env
+*.env.local
+
+# --- ML / Model Artifacts ---
+*.pth
+*.pt
+*.h5
+*.bin
+*.onnx
+checkpoints/
+runs/
+
+# --- IDE & Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Miscellaneous ---
+*.tmp
+*.bak

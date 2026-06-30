@@ -1,0 +1,19 @@
+# Core ML
+torch>=2.0.0
+transformers>=4.36.0
+
+# LoRA fine-tuning
+peft>=0.7.0
+
+# Datasets & evaluation
+datasets>=2.14.0
+scikit-learn>=1.0.0
+
+# Data manipulation
+numpy>=1.17
+
+# HuggingFace Hub
+huggingface-hub>=0.21.0
+
+# Progress bars
+tqdm>=4.64.0
