@@ -15,8 +15,10 @@ class PathsConfig:
     """Paths configuration: data, model, output directories, etc."""
 
     hf_endpoint: str = "https://hf-mirror.com"
-    dataset_name: str = "Hello-SimpleAI/HC3-Chinese"  # Dataset name on HuggingFace
-    data_dir: Optional[str] = "/kaggle/input/datasets/dylanzihao/modified-hc3-chinese-for-transformers-training"  # Preprocessed data directory
+    # --- C-ReD dataset (本地) ---
+    cred_local_dir: str = r"D:\Dylan\Data\C-ReD\benchmark data"  # C-ReD 本地路径
+    cred_domains: tuple = ("news", "question answer", "film review", "paper", "composition")  # C-ReD 领域
+    data_dir: str = "/kaggle/input/datasets/dylanzihao/detectgpt-training-dataset"  # 预处理后数据目录
     train_file: Optional[str] = None  # Explicit train file path (takes precedence over data_dir)
     dev_file: Optional[str] = None  # Explicit validation file path
     test_file: Optional[str] = None  # Explicit test file path
@@ -41,11 +43,25 @@ class DataConfig:
     train_ratio: float = 0.8  # Training set ratio
     dev_ratio: float = 0.1  # Validation set ratio
     test_ratio: float = 0.1  # Test set ratio
-    min_text_length: int = 5  # Minimum valid text length (characters)
-    max_samples_per_subset: Optional[int] = None  # Max question entries per subset, None = unlimited
-    balance: bool = True  # Whether to balance classes (downsample majority)
-    question_level_split: bool = True  # Whether to split at question level to prevent data leakage
+    # --- 文本过滤 ---
+    min_text_length: int = 20  # 最小有效文本长度（字符）
+    max_text_length: int = 4096  # 最大有效文本长度（字符），超过截断
+    min_chinese_ratio: float = 0.3  # 最小中文字符占比（过滤纯英文/数字文本）
+    # --- 文本清洗 ---
+    clean_control_chars: bool = True  # 移除控制字符
+    clean_urls: bool = True  # 规范化 URL（替换为 <URL> 占位符）
+    normalize_unicode: bool = True  # Unicode NFC 规范化
+    # --- 去重 ---
+    deduplicate: bool = True  # 是否去除重复文本
+    dedup_method: str = "exact"  # 去重方式: "exact"(完全匹配) | "normalized"(清洗后匹配)
+    # --- 类别平衡 ---
+    balance: bool = True  # 是否平衡类别
+    balance_strategy: str = "downsample"  # 平衡策略: "downsample"(下采样多数类) | "upsample"(上采样少数类)
+    # --- 分割策略 ---
+    stratified_split: bool = True  # 是否按领域分层分割（保证各领域均匀分布）
+    question_level_split: bool = True  # (已废弃，C-ReD 为记录级数据)
     max_train_samples: int = 0  # Max training samples (0 = full dataset)
+    max_samples_per_subset: Optional[int] = None  # Max question entries per subset, None = unlimited
 
 
 @dataclass
