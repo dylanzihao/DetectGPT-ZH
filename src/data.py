@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+try:
+    from nlpcda import Similarword, RandomDeleteChar, CharPositionExchange
+    _nlpcda_available = True
+except ImportError:
+    _nlpcda_available = False
 
 from config import config
 
@@ -79,8 +84,8 @@ def parse_args() -> argparse.Namespace:
                         help="禁用文本去重")
     parser.add_argument("--balance", action="store_true", default=config.data.balance)
     parser.add_argument("--balance_strategy", type=str, default=config.data.balance_strategy,
-                        choices=("downsample", "upsample"),
-                        help="平衡策略: downsample(下采样) | upsample(上采样)")
+                        choices=("downsample", "upsample", "augment"),
+                        help="平衡策略: downsample(下采样) | upsample(上采样) | augment(nlpcda增强)")
     parser.add_argument("--no_stratified", action="store_true",
                         help="禁用分层分割，使用纯随机分割")
     return parser.parse_args()
@@ -302,6 +307,122 @@ def deduplicate_records(records: List[TextRecord], method: str) -> Tuple[List[Te
 # Class balancing
 # ---------------------------------------------------------------------------
 
+def _augment_human_texts(
+    human_recs: List[TextRecord], seed: int
+) -> List[TextRecord]:
+    """
+    Augment human-written texts using nlpcda to increase minority class diversity.
+
+    Uses multiple augmentation methods per original text:
+      - Similarword      (近义词替换)  → 1 variant
+      - RandomDeleteChar (随机字删除)  → 1 variant
+      - CharPositionExchange (邻近字换位) → 1 variant
+
+    Each original human text produces up to 3 augmented variants. After generation,
+    augmented texts are filtered through the same cleaning/validation pipeline.
+    The final count targets config.data.augment_target_count or doubles at minimum.
+
+    Returns:
+        List of augmented TextRecord (additional, not including originals)
+    """
+    if not _nlpcda_available:
+        logger.error("nlpcda 未安装! 请运行: pip install nlpcda")
+        return []
+
+    target = config.data.augment_target_count
+    n_orig = len(human_recs)
+    change_rate = config.data.augment_change_rate
+
+    # Determine how many augmenters and variants per text
+    methods = config.data.augment_methods
+    n_augmenters = len(methods)
+
+    # variants per original text to hit target
+    needed = max(target - n_orig, n_orig)  # at least double
+    variants_per_text = max(1, needed // (n_orig * n_augmenters))
+
+    logger.info("  nlpcda 增强: %d 条原始人类文本 → 目标 ~%d 条", n_orig, target)
+    logger.info("    增强方法: %s", ", ".join(methods))
+    logger.info("    每条文本生成 %d 个变体/方法 → 最多 %d 条增强文本",
+                 variants_per_text, n_orig * n_augmenters * variants_per_text)
+
+    rng = random.Random(seed)
+    augmented_orig_count = 0
+    augmented_total = 0
+    augmented_filtered = 0
+
+    augmented = []
+
+    # Create augmenters once (nlpcda returns original as first element, so create_num + 1)
+    augmenters = {}
+    if "synonym" in methods:
+        augmenters["synonym"] = Similarword(
+            create_num=variants_per_text + 1, change_rate=change_rate
+        )
+    if "char_delete" in methods:
+        augmenters["char_delete"] = RandomDeleteChar(
+            create_num=variants_per_text + 1, change_rate=change_rate
+        )
+    if "char_swap" in methods:
+        augmenters["char_swap"] = CharPositionExchange(
+            create_num=variants_per_text + 1, change_rate=change_rate
+        )
+
+    for rec in human_recs:
+        augmented_orig_count += 1
+        for method_name, aug in augmenters.items():
+            try:
+                variants = aug.replace(rec.text)
+                # nlpcda returns [original, variant1, variant2, ...]; skip first (original)
+                taken = 0
+                for variant_text in variants:
+                    if variant_text == rec.text:
+                        continue  # skip unchanged/original
+                    if taken >= variants_per_text:
+                        break
+                    taken += 1
+
+                    # Clean and validate the augmented text
+                    cleaned = clean_text(variant_text)
+                    if cleaned is None:
+                        augmented_filtered += 1
+                        continue
+
+                    aug_rec = TextRecord(
+                        text=cleaned,
+                        label=0,  # still human
+                        domain=rec.domain,
+                        generator=f"aug_{method_name}",
+                    )
+                    if not is_valid_record(aug_rec):
+                        augmented_filtered += 1
+                        continue
+
+                    augmented.append(aug_rec)
+                    augmented_total += 1
+
+                    # Stop if we hit the target
+                    if len(augmented) + n_orig >= target:
+                        break
+            except Exception as e:
+                logger.debug("    增强失败 [%s]: %s", method_name, e)
+                continue
+
+            if len(augmented) + n_orig >= target:
+                break
+
+        if len(augmented) + n_orig >= target:
+            break
+
+    logger.info("    处理 %d 条原始文本", augmented_orig_count)
+    logger.info("    生成 %d 条增强文本, 过滤 %d 条无效",
+                 augmented_total, augmented_filtered)
+    logger.info("    最终: %d 条人类文本 (原始 %d + 增强 %d)",
+                 n_orig + len(augmented), n_orig, len(augmented))
+
+    return augmented
+
+
 def balance_records(
     records: List[TextRecord], strategy: str, seed: int
 ) -> List[TextRecord]:
@@ -309,7 +430,7 @@ def balance_records(
     Balance class distribution.
 
     Args:
-        strategy: "downsample" (discard majority) | "upsample" (duplicate minority)
+        strategy: "downsample" | "upsample" | "augment"
     """
     human_recs = [r for r in records if r.label == 0]
     ai_recs = [r for r in records if r.label == 1]
@@ -343,6 +464,19 @@ def balance_records(
             ai_recs.extend(extra)
         logger.info("  上采样: human %d→%d, AI %d→%d",
                      n_human, len(human_recs), n_ai, len(ai_recs))
+
+    elif strategy == "augment":
+        # Augment human texts, then downsample AI to match
+        augmented = _augment_human_texts(human_recs, seed)
+        human_recs.extend(augmented)
+
+        # Downsample AI to match the new human count
+        n_human_new = len(human_recs)
+        if n_human_new < n_ai:
+            rng.shuffle(ai_recs)
+            ai_recs = ai_recs[:n_human_new]
+        logger.info("  augment 策略: human %d→%d (增强 +%d), AI %d→%d",
+                     n_human, n_human_new, len(augmented), n_ai, len(ai_recs))
 
     balanced = human_recs + ai_recs
     rng.shuffle(balanced)

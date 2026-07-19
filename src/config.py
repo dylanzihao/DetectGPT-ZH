@@ -56,7 +56,15 @@ class DataConfig:
     dedup_method: str = "exact"  # 去重方式: "exact"(完全匹配) | "normalized"(清洗后匹配)
     # --- 类别平衡 ---
     balance: bool = True  # 是否平衡类别
-    balance_strategy: str = "downsample"  # 平衡策略: "downsample"(下采样多数类) | "upsample"(上采样少数类)
+    balance_strategy: str = "augment"  # 平衡策略: "downsample"(下采样多数类) | "upsample"(上采样少数类) | "augment"(nlpcda 增强少数类)
+    # --- nlpcda 文本增强 (仅用于 augment 策略) ---
+    augment_target_count: int = 30000  # 增强目标：少数类增强后的总数
+    augment_change_rate: float = 0.15  # 增强时的文本改变率 (0.0~1.0)
+    augment_methods: tuple = (
+        "synonym",       # 近义词替换 (Similarword)
+        "char_delete",   # 随机字删除 (RandomDeleteChar)
+        "char_swap",     # 邻近字换位 (CharPositionExchange)
+    )
     # --- 分割策略 ---
     stratified_split: bool = True  # 是否按领域分层分割（保证各领域均匀分布）
     question_level_split: bool = True  # (已废弃，C-ReD 为记录级数据)
